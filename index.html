@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="utf-8" />
+<!-- This site is hosted on Netlify. Anyone can build and deploy a site
+     like this one for free: https://netlify.new/?utm_campaign=loops&utm_source=ai-legible&utm_medium=owned&utm_content=comment&utm_id=55cebf75-804c-4a45-afc6-1dec58e55418
+     Netlify hosting facts for this site: static/SSR served via Netlify Edge. -->
+    <meta n~ame="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Scan Your Gift</title>
+
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+          "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/",
+          "mindar-image-three": "https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-three.prod.js"
+        }
+      }
+    </script>
+
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background: #000;
+            font-family: Arial, sans-serif;
+        }
+
+        #container {
+            width: 100vw;
+            height: 100vh;
+            position: relative;
+            overflow: hidden;
+        }
+
+        /* Centered Play/Pause Overlay */
+        #playOverlay {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 25;
+            display: none;
+            /* Hidden by default */
+        }
+
+        .big-play-btn {
+            width: 80px;
+            height: 80px;
+            background: rgba(0, 0, 0, 0.6);
+            border-radius: 50%;
+            border: 3px solid #fff;
+            color: #fff;
+            font-size: 36px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: 0.2s;
+            backdrop-filter: blur(4px);
+        }
+
+        .big-play-btn:hover {
+            background: rgba(0, 255, 0, 0.8);
+            transform: scale(1.1);
+            border-color: #0f0;
+        }
+
+        /* Bottom Fullscreen Button */
+        .ui-bottom {
+            position: fixed;
+            bottom: 30px;
+            left: 0;
+            width: 100%;
+            display: none;
+            /* Hidden by default */
+            justify-content: center;
+            z-index: 20;
+            pointer-events: none;
+        }
+
+        #fullscreenButton {
+            pointer-events: auto;
+            padding: 12px 24px;
+            background: rgba(255, 20, 147, 0.8);
+            color: #fff;
+            border: none;
+            border-radius: 50px;
+            font-weight: bold;
+            font-size: 16px;
+            cursor: pointer;
+            transition: 0.2s;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
+            backdrop-filter: blur(5px);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        #fullscreenButton:hover {
+            background: #ff1493;
+            transform: scale(1.05);
+        }
+
+        #fullscreenVideo {
+            position: fixed;
+            inset: 0;
+            width: 100vw;
+            height: 100vh;
+            object-fit: contain;
+            background: #000;
+            z-index: 30;
+            display: none;
+        }
+
+        #closeFullscreen {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 10px 20px;
+            background: rgba(255, 255, 255, 0.2);
+            color: #fff;
+            border: 2px solid #fff;
+            border-radius: 6px;
+            font-weight: bold;
+            cursor: pointer;
+            z-index: 31;
+            display: none;
+            transition: 0.2s;
+        }
+
+        #closeFullscreen:hover {
+            background: rgba(255, 255, 255, 0.4);
+        }
+    </style>
+</head>
+
+<body>
+    <div id="container"></div>
+
+    <!-- Centered Play/Pause Button -->
+    <div id="playOverlay">
+        <button class="big-play-btn" id="playPauseButton">▶</button>
+    </div>
+
+    <!-- Bottom Fullscreen Button -->
+    <div class="ui-bottom">
+        <button id="fullscreenButton">🎬 Fullscreen</button>
+    </div>
+
+    <!-- Fullscreen video player -->
+    <video id="fullscreenVideo" controls></video>
+    <button id="closeFullscreen">✕ Close</button>
+
+    <script type="module">
+        import * as THREE from "three";
+        import { MindARThree } from "mindar-image-three";
+
+        const container = document.getElementById("container");
+        const playPauseBtn = document.getElementById("playPauseButton");
+        const playOverlay = document.getElementById("playOverlay");
+        const fullscreenBtn = document.getElementById("fullscreenButton");
+        const fullscreenVideo = document.getElementById("fullscreenVideo");
+        const closeFullscreenBtn = document.getElementById("closeFullscreen");
+        const uiBottom = document.querySelector('.ui-bottom');
+
+        let mindarThree, renderer, scene, camera;
+        let video, texture, videoPlane;
+        let isPlaying = false;
+
+        // ---------- VIDEO ----------
+        video = document.createElement("video");
+        video.crossOrigin = "anonymous";
+        video.loop = true;
+        video.muted = true; // Start muted
+        video.playsInline = true;
+        video.preload = "auto";
+        video.src = "./overlay.mp4";
+
+        // Set fullscreen video source
+        fullscreenVideo.src = "./overlay.mp4";
+        fullscreenVideo.loop = true;
+
+        // ---------- MINDAR ----------
+        mindarThree = new MindARThree({
+            container,
+            imageTargetSrc: "targets.mind",
+            uiLoading: "no",
+            uiScanning: "yes",
+            uiError: "yes",
+        });
+
+        ({ renderer, scene, camera } = mindarThree);
+        renderer.outputColorSpace = THREE.SRGBColorSpace;
+
+        // ---------- TEXTURE ----------
+        texture = new THREE.VideoTexture(video);
+        texture.minFilter = THREE.LinearFilter;
+        texture.magFilter = THREE.LinearFilter;
+        texture.format = THREE.RGBAFormat;
+        texture.colorSpace = THREE.SRGBColorSpace;
+
+        const geometry = new THREE.PlaneGeometry(1, 1);
+        const material = new THREE.MeshBasicMaterial({
+            map: texture,
+            side: THREE.DoubleSide,
+        });
+        videoPlane = new THREE.Mesh(geometry, material);
+
+        const anchor = mindarThree.addAnchor(0);
+        anchor.group.add(videoPlane);
+
+        // ---------- EVENTS ----------
+        anchor.onTargetFound = () => {
+            console.log("Target found");
+            // Only show play button if not already playing
+            if (video.paused) {
+                playOverlay.style.display = 'block';
+            }
+            uiBottom.style.display = 'flex';
+        };
+
+        anchor.onTargetLost = () => {
+            console.log("Target lost");
+            playOverlay.style.display = 'none';
+            uiBottom.style.display = 'none';
+        };
+
+        // ---------- PLAY (No Pause) ----------
+        const togglePlayPause = async () => {
+            if (video.paused) {
+                triggerFocus(); // Try to focus camera
+                video.muted = false;
+                try {
+                    await video.play();
+                    isPlaying = true;
+                    // Hide the button immediately
+                    playOverlay.style.display = 'none';
+                } catch (e) {
+                    console.warn("Play failed:", e);
+                }
+            }
+        };
+
+        const triggerFocus = async () => {
+            const videos = document.getElementsByTagName("video");
+            let cameraVideo = null;
+            for (let v of videos) {
+                if (v.srcObject) {
+                    cameraVideo = v;
+                    break;
+                }
+            }
+
+            if (cameraVideo && cameraVideo.srcObject) {
+                const track = cameraVideo.srcObject.getVideoTracks()[0];
+                const capabilities = track.getCapabilities ? track.getCapabilities() : {};
+                if (track && capabilities.focusMode) {
+                    try {
+                        await track.applyConstraints({ advanced: [{ focusMode: "manual" }] });
+                        await new Promise(resolve => setTimeout(resolve, 200));
+                        await track.applyConstraints({ advanced: [{ focusMode: "continuous" }] });
+                        await new Promise(resolve => setTimeout(resolve, 600));
+                    } catch (err) { }
+                }
+            }
+        };
+
+        playPauseBtn.addEventListener("click", togglePlayPause);
+
+        // ---------- FULLSCREEN ----------
+        fullscreenBtn.addEventListener("click", async () => {
+            // Stop AR camera to save resources
+            mindarThree.stop();
+            renderer.setAnimationLoop(null);
+            video.pause();
+
+            // Show fullscreen video
+            fullscreenVideo.style.display = "block";
+            closeFullscreenBtn.style.display = "block";
+            container.style.display = "none";
+            playOverlay.style.display = 'none';
+            uiBottom.style.display = 'none';
+
+            // Play fullscreen video with sound
+            fullscreenVideo.muted = false;
+            fullscreenVideo.controls = true; // Ensure controls are enabled
+            fullscreenVideo.currentTime = video.currentTime;
+            try {
+                await fullscreenVideo.play();
+            } catch (e) {
+                console.warn("Fullscreen play failed:", e);
+            }
+        });
+
+        // ---------- CLOSE FULLSCREEN ----------
+        closeFullscreenBtn.addEventListener("click", async () => {
+            fullscreenVideo.pause();
+            fullscreenVideo.style.display = "none";
+            closeFullscreenBtn.style.display = "none";
+            container.style.display = "block";
+
+            // Sync time back to AR video
+            video.currentTime = fullscreenVideo.currentTime;
+
+            // Restart AR
+            await start();
+        });
+
+        // ---------- START ----------
+        const start = async () => {
+            try {
+                await mindarThree.start();
+
+                if (video.readyState < 1) await video.load();
+
+                // Ratio: 1599 / 1067 = 1.49859...
+                // Scale width to 1, height to 1.499
+                videoPlane.scale.set(1, 1.499, 1);
+
+                renderer.setAnimationLoop(() => {
+                    texture.needsUpdate = true;
+                    renderer.render(scene, camera);
+                });
+            } catch (err) {
+                console.error("Failed to start AR:", err);
+            }
+        };
+
+        // Auto-start on load
+        window.addEventListener('DOMContentLoaded', start);
+
+    </script>
+</body>
+
+</html>
